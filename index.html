@@ -8,8 +8,10 @@
 <meta name="theme-color" content="#0a1020">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="行動秘書">
 <style>
 :root{
@@ -135,6 +137,12 @@ button{cursor:pointer}
 .empty{text-align:center;color:var(--muted);padding:36px 12px}
 .empty .big{font-size:40px}
 
+/* iOS install guide */
+.install{position:fixed;left:12px;right:12px;bottom:calc(12px + env(safe-area-inset-bottom));z-index:40;background:#f4f6fb;color:#1c2235;border-radius:16px;padding:14px 44px 14px 14px;box-shadow:0 12px 36px rgba(0,0,0,.5);font-size:14px;line-height:1.6;max-width:480px;margin:0 auto}
+.install b{font-size:15px}
+.install .x{position:absolute;top:8px;right:8px;border:0;background:transparent;font-size:20px;color:#6b7390;width:32px;height:32px}
+.install .share{display:inline-block;width:18px;height:18px;vertical-align:-3px}
+
 /* Saved chip (bottom-left) */
 .saved{position:fixed;left:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:25;background:var(--top);border:1px solid var(--line);color:var(--text);border-radius:99px;padding:6px 14px;font-size:14px;display:flex;gap:6px;align-items:center;box-shadow:var(--shadow);opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}
 .saved.show{opacity:.95;visibility:visible}
@@ -232,6 +240,12 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
 
 <button class="fab" id="fab" aria-label="新增待辦">＋</button>
 <div class="saved" id="saved">☁️ 已儲存</div>
+<div class="install" id="install" hidden>
+  <button class="x" id="installClose" aria-label="關閉">×</button>
+  <b>📲 把行動秘書加到主畫面</b><br>
+  在 Safari 點 <svg class="share" viewBox="0 0 24 24" fill="none" stroke="#2f6cf6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M8 7l4-4 4 4"/><path d="M5 11v9h14v-9"/></svg> <b>分享</b>（在網址列旁，或「⋯」選單裡）→ 選 <b>「加入主畫面」</b> → 右上角 <b>「加入」</b>。<br>
+  之後從主畫面圖示打開，就像 App 一樣，也能收到提醒通知。
+</div>
 
 <dialog id="addDlg">
   <div class="dlg">
@@ -519,7 +533,7 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
   }
   const canNotify = () => 'Notification' in window;
   function notifyLabel(){
-    if(!canNotify()) return '此瀏覽器不支援通知（iPhone 請先「加入主畫面」）';
+    if(!canNotify()) return 'iPhone 需先「加入主畫面」，再從主畫面圖示打開才能開啟通知';
     return {granted:'已開啟 ✅',denied:'已被封鎖，請到瀏覽器設定允許',default:'尚未開啟'}[Notification.permission];
   }
   function refreshNotifyUI(){
@@ -621,6 +635,17 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
     state.tasks.find(t=>t.title==='準備週報').done = true; state.tasks.find(t=>t.title==='準備週報').doneAt = d(0);
     save();
   }
+  // iPhone / iPad Safari：還沒加入主畫面時，顯示教學提示
+  (() => {
+    const ua = navigator.userAgent;
+    const isIOS = /iPhone|iPad|iPod/.test(ua) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1);
+    const standalone = navigator.standalone || matchMedia('(display-mode: standalone)').matches;
+    let dismissed = false; try{ dismissed = localStorage.getItem(KEY+'.installHint')==='1'; }catch(e){}
+    if(isIOS && !standalone && !dismissed){
+      $('#install').hidden = false;
+      $('#installClose').onclick = () => { $('#install').hidden = true; try{ localStorage.setItem(KEY+'.installHint','1'); }catch(e){} };
+    }
+  })();
   refreshNotifyUI();
   render();
   checkReminders();
