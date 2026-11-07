@@ -269,6 +269,10 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
       <input type="time" class="input" id="dailyTime" style="width:auto">
     </div>
     <div class="settings-item">
+      <div>鎖定畫面顯示未完成清單<small>離開 App 或鎖屏時，把未完成事項以通知留在鎖定畫面</small></div>
+      <input type="checkbox" id="lockList" style="width:22px;height:22px;accent-color:var(--brand)">
+    </div>
+    <div class="settings-item">
       <div>瀏覽器通知<small id="notifyState"></small></div>
       <button class="btn ghost" id="notifyBtn2" type="button">開啟</button>
     </div>
@@ -596,11 +600,38 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
     if(today() !== lastDay){ lastDay = today(); render(); }
     checkReminders();
   }, 30000);
-  document.addEventListener('visibilitychange', () => { if(!document.hidden){ lastDay = today(); render(); checkReminders(); } });
+  // 鎖定畫面清單：離開 App／鎖屏時發出一則「未完成清單」通知（同一個 tag 會覆蓋舊的，只留最新一則）
+  const LOCK_TAG = 'pending-list';
+  function lockListText(){
+    const now = today();
+    const opens = open().sort((a,b) => ({late:0,carry:1,todo:2}[status(a,now)] - {late:0,carry:1,todo:2}[status(b,now)]) || sortOpen(a,b));
+    const mark = {late:'🔴',carry:'🟠',todo:'🔵'};
+    const lines = opens.slice(0,8).map(t => `${mark[status(t,now)]} ${t.title}`);
+    if(opens.length>8) lines.push(`…還有 ${opens.length-8} 項`);
+    return {count:opens.length, body:lines.join('\n')};
+  }
+  async function clearLockList(){
+    try{ if(swReg && swReg.getNotifications){ (await swReg.getNotifications({tag:LOCK_TAG})).forEach(n=>n.close()); } }catch(e){}
+  }
+  function postLockList(){
+    if(state.settings.lockList === false) return;
+    if(!canNotify() || Notification.permission!=='granted') return;
+    const {count, body} = lockListText();
+    if(!count){ clearLockList(); return; }
+    const opt = {body, tag:LOCK_TAG, icon:'icon-192.png', badge:'icon-192.png', renotify:false, silent:true};
+    if(swReg && swReg.showNotification) swReg.showNotification(`📋 還有 ${count} 項未完成`, opt).catch(()=>{});
+    else { try{ new Notification(`📋 還有 ${count} 項未完成`, opt); }catch(e){} }
+  }
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden){ postLockList(); return; }
+    lastDay = today(); render(); checkReminders(); clearLockList();
+  });
+  window.addEventListener('pagehide', postLockList);
 
   /* ---------- settings ---------- */
-  $('#settingsBtn').onclick = () => { $('#dailyTime').value = state.settings.dailyTime||'09:00'; refreshNotifyUI(); $('#settingsDlg').showModal(); };
+  $('#settingsBtn').onclick = () => { $('#dailyTime').value = state.settings.dailyTime||'09:00'; $('#lockList').checked = state.settings.lockList !== false; refreshNotifyUI(); $('#settingsDlg').showModal(); };
   $('#closeSettings').onclick = () => $('#settingsDlg').close();
+  $('#lockList').onchange = e => { state.settings.lockList = e.target.checked; save(); if(!e.target.checked) clearLockList(); else if(canNotify() && Notification.permission!=='granted') askNotify(); };
   $('#dailyTime').onchange = e => { state.settings.dailyTime = e.target.value || '09:00'; delete state.notified.daily; save(); };
   $('#exportBtn').onclick = () => {
     const blob = new Blob([JSON.stringify({app:'mobile-secretary',version:1,tasks:state.tasks},null,2)],{type:'application/json'});
