@@ -101,9 +101,6 @@ button{cursor:pointer}
 .tab.on .badge{background:var(--brand);color:#fff}
 
 /* Banner */
-.banner{display:none;align-items:center;gap:10px;border-radius:12px;padding:12px 14px;margin-bottom:6px;background:color-mix(in srgb,var(--late) 14%,var(--surface));border:1px solid color-mix(in srgb,var(--late) 40%,transparent);font-size:14px}
-.banner.show{display:flex}
-.banner b{color:#ff8a8a}
 
 /* Task list */
 .group-title{font-size:13px;color:var(--muted);margin:16px 2px 2px;display:flex;align-items:center;gap:8px;font-weight:700;letter-spacing:.5px}
@@ -232,7 +229,6 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
         <button class="tab" data-tab="done">每日完成紀錄<span class="badge" id="bDone">0</span></button>
         <button class="tab" data-tab="all">全部紀錄</button>
       </div>
-      <div class="banner" id="banner">⏰ <div id="bannerText"></div></div>
       <div id="listArea"></div>
     </section>
   </div>
@@ -484,9 +480,6 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
     $('#pBar').style.width = total ? (doneToday.length/total*100)+'%' : '0%';
 
     const carried = by.carry.length + by.late.length;
-    const banner = $('#banner');
-    banner.classList.toggle('show', tab==='today' && carried>0);
-    $('#bannerText').innerHTML = `你有 <b>${carried}</b> 項之前沒完成的事情延續到今天${by.late.length?`，其中 <b style="color:var(--late)">${by.late.length}</b> 項已逾期或拖延 3 天以上`:''}，別忘了處理喔！`;
 
     let html = '';
     if(tab==='today'){
