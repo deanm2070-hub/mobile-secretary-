@@ -143,6 +143,13 @@ button{cursor:pointer}
 .install .x{position:absolute;top:8px;right:8px;border:0;background:transparent;font-size:20px;color:#6b7390;width:32px;height:32px}
 .install .share{display:inline-block;width:18px;height:18px;vertical-align:-3px}
 
+.card-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.wp-btn{border:1px solid var(--line);background:var(--surface-2);color:var(--text);border-radius:99px;padding:6px 12px;font-size:14px;font-weight:600;white-space:nowrap}
+.wp-btn:hover{border-color:var(--brand)}
+.wp-preview{display:block;width:auto;max-width:100%;max-height:46vh;margin:0 auto 12px;border-radius:22px;border:1px solid var(--line);box-shadow:var(--shadow);-webkit-touch-callout:default}
+.wp-steps{font-size:14px;color:var(--muted);line-height:1.7;margin:0 0 12px;padding-left:20px}
+.wp-steps b{color:var(--text)}
+
 /* Saved chip (bottom-left) */
 .saved{position:fixed;left:16px;bottom:calc(16px + env(safe-area-inset-bottom));z-index:25;background:var(--top);border:1px solid var(--line);color:var(--text);border-radius:99px;padding:6px 14px;font-size:14px;display:flex;gap:6px;align-items:center;box-shadow:var(--shadow);opacity:0;visibility:hidden;transition:opacity .3s,visibility .3s}
 .saved.show{opacity:.95;visibility:visible}
@@ -153,7 +160,7 @@ button{cursor:pointer}
 .toast button{border:0;background:transparent;color:#a5b4fc;font-weight:700;padding:0}
 
 /* Dialog */
-dialog{border:1px solid var(--line);border-radius:18px;padding:0;background:var(--surface);color:var(--text);width:min(440px,calc(100% - 32px));box-shadow:0 20px 60px rgba(0,0,0,.5)}
+dialog{max-height:calc(100dvh - 32px);overflow:auto;border:1px solid var(--line);border-radius:18px;padding:0;background:var(--surface);color:var(--text);width:min(440px,calc(100% - 32px));box-shadow:0 20px 60px rgba(0,0,0,.5)}
 dialog::backdrop{background:rgba(3,6,15,.65)}
 .dlg{padding:18px}
 .dlg h3{margin:0 0 12px}
@@ -226,7 +233,7 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
     </div>
 
     <section class="card">
-      <h2>待辦事項</h2>
+      <div class="card-head"><h2>待辦事項</h2><button class="wp-btn" id="wpBtn" type="button">📱 鎖屏桌布</button></div>
       <div class="tabs" role="tablist">
         <button class="tab on" data-tab="today">今日待辦<span class="badge" id="bToday">0</span></button>
         <button class="tab" data-tab="done">每日完成紀錄<span class="badge" id="bDone">0</span></button>
@@ -258,6 +265,19 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
   <div class="dlg">
     <h3>✏️ 編輯事項</h3>
     <form id="editForm" autocomplete="off"></form>
+  </div>
+</dialog>
+
+<dialog id="wpDlg">
+  <div class="dlg">
+    <h3>📱 鎖屏桌布清單</h3>
+    <img class="wp-preview" id="wpImg" alt="未完成事項鎖屏桌布">
+    <ol class="wp-steps">
+      <li>按 <b>儲存桌布</b>，選「<b>儲存影像</b>」存到照片（或長按上方圖片儲存）</li>
+      <li>到 <b>照片</b> 打開這張圖 → 分享 → <b>「用作背景圖片」</b></li>
+      <li>事項有變動時，回來再產生一次就好</li>
+    </ol>
+    <div class="dlg-actions"><button class="btn ghost" type="button" id="wpClose">關閉</button><button class="btn" type="button" id="wpSave">儲存桌布</button></div>
   </div>
 </dialog>
 
@@ -633,6 +653,83 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
   $('#closeSettings').onclick = () => $('#settingsDlg').close();
   $('#lockList').onchange = e => { state.settings.lockList = e.target.checked; save(); if(!e.target.checked) clearLockList(); else if(canNotify() && Notification.permission!=='granted') askNotify(); };
   $('#dailyTime').onchange = e => { state.settings.dailyTime = e.target.value || '09:00'; delete state.notified.daily; save(); };
+
+  /* ---------- 鎖屏桌布：把未完成事項畫成一張手機桌布 ---------- */
+  let wpBlob = null, wpURL = null;
+  function roundRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r); ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath(); }
+  function makeWallpaper(){
+    const dpr = Math.min(window.devicePixelRatio||3, 3);
+    const W = Math.round(Math.min(screen.width, screen.height) * dpr) || 1179;
+    const H = Math.round(Math.max(screen.width, screen.height) * dpr) || 2556;
+    const c = document.createElement('canvas'); c.width = W; c.height = H;
+    const g = c.getContext('2d'); const u = W/390;  // 以 390pt 寬為基準
+    const FONT = '-apple-system,"PingFang TC","Noto Sans TC","Microsoft JhengHei",sans-serif';
+    // 背景：深藍漸層
+    const bg = g.createLinearGradient(0,0,W*0.3,H); bg.addColorStop(0,'#1b2650'); bg.addColorStop(.55,'#0f1730'); bg.addColorStop(1,'#070b18');
+    g.fillStyle = bg; g.fillRect(0,0,W,H);
+    const glow = g.createRadialGradient(W*0.8,H*0.15,0,W*0.8,H*0.15,W*0.9); glow.addColorStop(0,'rgba(91,108,255,.28)'); glow.addColorStop(1,'rgba(91,108,255,0)');
+    g.fillStyle = glow; g.fillRect(0,0,W,H);
+
+    const now = today();
+    const rank = {late:0,carry:1,todo:2};
+    const items = open().sort((a,b) => rank[status(a,now)]-rank[status(b,now)] || sortOpen(a,b));
+    const color = {late:'#ff5c5c',carry:'#f0a23b',todo:'#4f8ff7'};
+    const maxRows = 11;
+    const rows = items.slice(0,maxRows);
+    // 清單卡片：避開上方時鐘區與下方手電筒/相機
+    const x = 22*u, w = W-44*u, top = H*0.36, headH = 52*u, pad = 18*u;
+    const extra = items.length>maxRows ? 1 : 0;
+    const n = Math.max(rows.length+extra,1);
+    const rowH = Math.min(40*u, (H*0.85 - top - headH - pad)/n);
+    const h = headH + n*rowH + pad;
+    g.fillStyle = 'rgba(255,255,255,.10)'; roundRect(g,x,top,w,h,24*u); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.14)'; g.lineWidth = 1.2*u; g.stroke();
+    g.textBaseline = 'middle';
+    g.fillStyle = '#ffffff'; g.font = `700 ${19*u}px ${FONT}`;
+    g.fillText(items.length ? `🔔 還有 ${items.length} 項未完成` : '🎉 今天的事都完成了！', x+pad, top+28*u);
+    g.fillStyle = 'rgba(255,255,255,.55)'; g.font = `500 ${12*u}px ${FONT}`; g.textAlign = 'right';
+    const d = new Date(); g.fillText(`更新 ${d.getMonth()+1}/${d.getDate()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`, x+w-pad, top+29*u);
+    g.textAlign = 'left';
+    rows.forEach((t,i) => {
+      const y = top + headH + i*rowH + rowH/2;
+      const st = status(t,now);
+      g.fillStyle = color[st]; g.beginPath(); g.arc(x+pad+7*u, y, 6.5*u, 0, Math.PI*2); g.fill();
+      g.fillStyle = '#f3f5ff'; g.font = `500 ${17*u}px ${FONT}`;
+      const age = daysBetween(t.created, now);
+      const tag = st==='todo' ? '' : (t.due && t.due<now ? `逾期${daysBetween(t.due,now)}天` : `第${age+1}天`);
+      const tagW = tag ? (g.font = `600 ${12*u}px ${FONT}`, g.measureText(tag).width + 16*u) : 0;
+      g.font = `500 ${17*u}px ${FONT}`;
+      let title = t.title; const maxW = w - pad*2 - 26*u - tagW - 8*u;
+      while(g.measureText(title).width > maxW && title.length>1) title = title.slice(0,-1);
+      if(title !== t.title) title = title.slice(0,-1)+'…';
+      g.fillText(title, x+pad+24*u, y);
+      if(tag){
+        g.fillStyle = color[st]; roundRect(g, x+w-pad-tagW, y-11*u, tagW, 22*u, 11*u); g.fill();
+        g.fillStyle = '#fff'; g.font = `600 ${12*u}px ${FONT}`; g.textAlign = 'center'; g.fillText(tag, x+w-pad-tagW/2, y+0.5*u); g.textAlign = 'left';
+      }
+    });
+    if(extra){ g.fillStyle = 'rgba(255,255,255,.6)'; g.font = `500 ${14*u}px ${FONT}`; g.fillText(`…還有 ${items.length-maxRows} 項，打開行動秘書查看`, x+pad+24*u, top+headH+maxRows*rowH+rowH/2); }
+    return c;
+  }
+  const pad2 = n => String(n).padStart(2,'0');
+  $('#wpBtn').onclick = () => {
+    const c = makeWallpaper();
+    c.toBlob(b => {
+      wpBlob = b; if(wpURL) URL.revokeObjectURL(wpURL); wpURL = URL.createObjectURL(b);
+      $('#wpImg').src = wpURL; $('#wpDlg').showModal();
+    }, 'image/png');
+  };
+  $('#wpClose').onclick = () => $('#wpDlg').close();
+  $('#wpSave').onclick = async () => {
+    if(!wpBlob) return;
+    const file = new File([wpBlob], `行動秘書桌布-${today()}.png`, {type:'image/png'});
+    try{
+      if(navigator.canShare && navigator.canShare({files:[file]})){ await navigator.share({files:[file]}); return; }
+    }catch(e){ if(e && e.name==='AbortError') return; }
+    const a = document.createElement('a'); a.href = wpURL; a.download = file.name; a.click();
+    toast('已下載桌布圖片；iPhone 也可以長按圖片儲存');
+  };
+
   $('#exportBtn').onclick = () => {
     const blob = new Blob([JSON.stringify({app:'mobile-secretary',version:1,tasks:state.tasks},null,2)],{type:'application/json'});
     const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `行動秘書備份-${today()}.json`; a.click();
