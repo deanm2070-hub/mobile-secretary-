@@ -1,0 +1,11 @@
+name = "mobile-secretary-push"
+main = "worker.js"
+compatibility_date = "2025-01-01"
+workers_dev = true
+
+[triggers]
+crons = ["*/5 * * * *"]
+
+[[kv_namespaces]]
+binding = "MS_KV"
+id = "KV_ID_PLACEHOLDER"

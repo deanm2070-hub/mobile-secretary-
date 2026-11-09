@@ -269,6 +269,10 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
       <button class="btn ghost" id="notifyBtn2" type="button">開啟</button>
     </div>
     <div class="settings-item">
+      <div>雲端推播<small id="cloudState">App 沒開時也會準時提醒</small></div>
+      <button class="btn ghost" id="cloudTest" type="button">測試</button>
+    </div>
+    <div class="settings-item">
       <div>備份資料<small>下載成檔案，可在別台裝置匯入</small></div>
       <button class="btn ghost" id="exportBtn" type="button">匯出</button>
     </div>
@@ -304,6 +308,7 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
   <div class="dlg-actions"><button class="btn ghost cancel" type="button" hidden>取消</button><button class="btn" type="submit">SUBMIT</button></div>
 </template>
 
+<script src="push-config.js"></script>
 <script>
 (() => {
   const KEY = 'mobile-secretary.v1';
@@ -330,7 +335,7 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
     return {tasks:[], settings:{dailyTime:'09:00'}, notified:{}};
   }
   let savedTimer;
-  function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); const el=document.getElementById('saved'); if(el){ el.classList.add('show'); clearTimeout(savedTimer); savedTimer=setTimeout(()=>el.classList.remove('show'),1500); } }catch(e){ toast('無法儲存，請確認瀏覽器允許儲存資料'); } }
+  function save(){ try{ localStorage.setItem(KEY, JSON.stringify(state)); if(typeof queueSync==='function') queueSync(); const el=document.getElementById('saved'); if(el){ el.classList.add('show'); clearTimeout(savedTimer); savedTimer=setTimeout(()=>el.classList.remove('show'),1500); } }catch(e){ toast('無法儲存，請確認瀏覽器允許儲存資料'); } }
   const uid = () => Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 
   /* ---------- status logic ----------
@@ -521,8 +526,53 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
 
   /* ---------- notifications ---------- */
   let swReg = null;
+
+  /* ---------- 雲端推播（App 沒開時也能準時提醒） ---------- */
+  const API = (window.PUSH_API || '').replace(/\/$/, '');
+  let cloudOn = false, syncTimer = null;
+  function deviceId(){
+    let id = null; try{ id = localStorage.getItem(KEY+'.device'); }catch(e){}
+    if(!id){ id = (Date.now().toString(36) + Math.random().toString(36).slice(2,12)).replace(/[^a-z0-9]/g,''); try{ localStorage.setItem(KEY+'.device', id); }catch(e){} }
+    return id;
+  }
+  const b64uToBytes = s => { s = s.replace(/-/g,'+').replace(/_/g,'/'); s += '='.repeat((4 - s.length % 4) % 4); return Uint8Array.from(atob(s), c => c.charCodeAt(0)); };
+  function cloudLabel(text){ const el = document.getElementById('cloudState'); if(el) el.textContent = text; }
+  async function setupCloud(fromClick){
+    if(!API){ cloudLabel('尚未啟用（等待雲端服務部署）'); return; }
+    if(!swReg || !('PushManager' in window)){ cloudLabel('此瀏覽器不支援；iPhone 請從主畫面圖示打開'); return; }
+    if(!canNotify() || Notification.permission!=='granted'){ cloudLabel('請先開啟通知'); return; }
+    try{
+      // 讓 sw.js 知道要去哪裡取通知內容
+      const cache = await caches.open('ms-config');
+      await cache.put('push-cfg', new Response(JSON.stringify({api:API, id:deviceId()})));
+      let sub = await swReg.pushManager.getSubscription();
+      if(!sub){
+        const {publicKey} = await (await fetch(API+'/vapid')).json();
+        sub = await swReg.pushManager.subscribe({userVisibleOnly:true, applicationServerKey:b64uToBytes(publicKey)});
+      }
+      await syncCloud(sub);
+      cloudOn = true; cloudLabel('已開啟 ✅ App 沒開也會準時提醒');
+      if(fromClick) toast('雲端推播已開啟');
+    }catch(e){ cloudLabel('開啟失敗，請稍後再試'); }
+  }
+  async function syncCloud(sub){
+    if(!API) return;
+    const now = today();
+    const tasks = open().map(t => ({id:t.id, title:t.title, st:status(t,now), age:daysBetween(t.created,now), time:t.time||''}))
+      .sort((a,b) => ({late:0,carry:1,todo:2}[a.st] - {late:0,carry:1,todo:2}[b.st]));
+    const body = {id:deviceId(), tz:-new Date().getTimezoneOffset(), dailyTime:state.settings.dailyTime||'09:00', tasks};
+    if(sub) body.sub = sub.toJSON();
+    await fetch(API+'/sync', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  }
+  function queueSync(){ if(!cloudOn) return; clearTimeout(syncTimer); syncTimer = setTimeout(() => syncCloud().catch(()=>{}), 800); }
+  document.getElementById('cloudTest').onclick = async () => {
+    if(!cloudOn){ await setupCloud(true); if(!cloudOn) return; }
+    try{ const r = await fetch(API+'/test', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({id:deviceId()})}); toast(r.ok ? '已送出測試推播，幾秒內會收到' : '測試失敗，請重新開啟通知'); }
+    catch(e){ toast('連不到雲端服務'); }
+  };
+
   if('serviceWorker' in navigator && location.protocol.startsWith('http')){
-    navigator.serviceWorker.register('sw.js').then(r => swReg = r).catch(()=>{});
+    navigator.serviceWorker.register('sw.js').then(r => { swReg = r; return navigator.serviceWorker.ready; }).then(() => setupCloud()).catch(()=>{});
   }
   const canNotify = () => 'Notification' in window;
   function notifyLabel(){
@@ -539,11 +589,12 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
     if(Notification.permission==='granted'){ notify('行動秘書', '通知功能正常 👍'); return; }
     const p = await Notification.requestPermission();
     refreshNotifyUI();
-    if(p==='granted'){ notify('行動秘書','提醒已開啟，我會準時提醒你未完成的事項！'); }
+    if(p==='granted'){ notify('行動秘書','提醒已開啟，我會準時提醒你未完成的事項！'); setupCloud(true); }
     else toast('未開啟通知，仍會在畫面上提醒你');
   }
   function notify(title, body, tag){
     if(!canNotify() || Notification.permission!=='granted') return;
+    if(cloudOn && tag) return; // 雲端推播會負責定時提醒，避免重複
     const opt = {body, tag, icon:'icon-192.png', badge:'icon-192.png', renotify:!!tag};
     if(swReg && swReg.showNotification) swReg.showNotification(title, opt).catch(()=>{ try{ new Notification(title,opt); }catch(e){} });
     else { try{ new Notification(title,opt); }catch(e){} }
@@ -589,7 +640,7 @@ dialog::backdrop{background:rgba(3,6,15,.65)}
     if(today() !== lastDay){ lastDay = today(); render(); }
     checkReminders();
   }, 30000);
-  document.addEventListener('visibilitychange', () => { if(!document.hidden){ lastDay = today(); render(); checkReminders(); } });
+  document.addEventListener('visibilitychange', () => { if(!document.hidden){ lastDay = today(); render(); checkReminders(); queueSync(); } });
 
   /* ---------- settings ---------- */
   $('#settingsBtn').onclick = () => { $('#dailyTime').value = state.settings.dailyTime||'09:00'; refreshNotifyUI(); $('#settingsDlg').showModal(); };
